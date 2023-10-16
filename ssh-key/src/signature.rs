@@ -105,29 +105,17 @@ impl Signature {
         // Validate signature is well-formed per OpensSH encoding
         match algorithm {
             Algorithm::Dsa if data.len() == DSA_SIGNATURE_SIZE => (),
-            Algorithm::Ecdsa { curve } => {
-                let reader = &mut data.as_slice();
-
-                for _ in 0..2 {
-                    let component = Mpint::decode(reader)?;
-
-                    if component.as_positive_bytes().ok_or(Error::Crypto)?.len()
-                        != curve.field_size()
-                    {
-                        return Err(encoding::Error::Length.into());
-                    }
-                }
-
-                reader.finish(())?;
-            }
+            Algorithm::Ecdsa { curve } => ecdsa_sig_size(&data, curve, false)?,
             Algorithm::Ed25519 if data.len() == ED25519_SIGNATURE_SIZE => (),
             Algorithm::SkEd25519 if data.len() == SK_ED25519_SIGNATURE_SIZE => (),
+            Algorithm::SkEcdsaSha2NistP256 => ecdsa_sig_size(&data, EcdsaCurve::NistP256, true)?,
             Algorithm::Rsa { hash: Some(_) } => (),
             _ => return Err(encoding::Error::Length.into()),
         }
 
         Ok(Self { algorithm, data })
     }
+
 
     /// Get the [`Algorithm`] associated with this signature.
     pub fn algorithm(&self) -> Algorithm {
@@ -154,12 +142,32 @@ impl Signature {
         self.algorithm == Algorithm::default() && self.data.is_empty()
     }
 }
+/// Returns Ok() if data holds an ecdsa signature with components of appropriate size
+/// according to curve.
+fn ecdsa_sig_size(data: &Vec<u8>, curve: EcdsaCurve, sk_trailer: bool) -> Result<()> {
+    let reader = &mut data.as_slice();
+
+    for _ in 0..2 {
+        let component = Mpint::decode(reader)?;
+
+        if component.as_positive_bytes().ok_or(Error::Crypto)?.len()
+            != curve.field_size()
+        {
+            return Err(encoding::Error::Length.into());
+        }
+    }
+    if sk_trailer {
+        reader.drain(5)?;
+    }
+    reader.finish(()).map_err(|_| encoding::Error::Length.into())
+}
 
 impl AsRef<[u8]> for Signature {
     fn as_ref(&self) -> &[u8] {
         self.as_bytes()
     }
 }
+
 
 impl Decode for Signature {
     type Error = Error;
@@ -168,14 +176,13 @@ impl Decode for Signature {
         let algorithm = Algorithm::decode(reader)?;
         let mut data = Vec::decode(reader)?;
 
-        if algorithm == Algorithm::SkEd25519 {
+        if algorithm == Algorithm::SkEd25519 || algorithm == Algorithm::SkEcdsaSha2NistP256 {
             let flags = u8::decode(reader)?;
             let counter = u32::decode(reader)?;
 
             data.push(flags);
             data.extend(counter.to_be_bytes());
         }
-
         Self::new(algorithm, data)
     }
 }
@@ -304,6 +311,8 @@ impl Verifier<Signature> for public::KeyData {
             Self::Ed25519(pk) => pk.verify(message, signature),
             #[cfg(feature = "ed25519")]
             Self::SkEd25519(pk) => pk.verify(message, signature),
+            #[cfg(feature = "p256")]
+            Self::SkEcdsaSha2NistP256(pk) => pk.verify(message, signature),
             #[cfg(feature = "rsa")]
             Self::Rsa(pk) => pk.verify(message, signature),
             #[allow(unreachable_patterns)]

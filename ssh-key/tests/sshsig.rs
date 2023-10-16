@@ -52,8 +52,8 @@ const ED25519_SIGNATURE_BYTES: [u8; 64] = hex!(
 const SK_ED25519_PUBLIC_KEY: &str = include_str!("examples/id_sk_ed25519_2.pub");
 
 
-
-const SK_ECDSA_P256_PUBLIC_KEY: &str = include_str!("examples/id_sk_ed25519_2.pub");
+#[cfg(feature = "p256")]
+const SK_ECDSA_P256_PUBLIC_KEY: &str = include_str!("examples/id_sk_ecdsa_p256_2.pub");
 
 /// `sshsig`-encoded signature.
 const SK_ED25519_SIGNATURE: &str = include_str!("examples/sshsig_sk_ed25519");
@@ -188,8 +188,8 @@ fn sign_dsa() {
     );
 }
 
-
 #[test]
+#[cfg(feature = "p256")]
 fn verify_sk_dsa_openssh_wire_format() {
     let signature = Signature::decode(&mut SK_ECDSA_SIGNATURE_OPENSSH_WIRE.as_ref()).unwrap();
     let verifying_key = SK_ECDSA_P256_PUBLIC_KEY.parse::<PublicKey>().unwrap();
